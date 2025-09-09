@@ -1,39 +1,25 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import axios from "axios";
+import { Pagination, Modal, Card, Skeleton } from "antd";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+import "antd/dist/reset.css";
 import styles from "./Home.module.css";
-import { useEffect, useRef, useState } from "react";
 
-const PUBLIC_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+// Config: use NEXT_PUBLIC_API_URL ou NEXT_PUBLIC_API_BASE_URL, senão usa rewrites e chama "/api/..."
+const BASE =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-async function fetchJsonWithFallback(path, options) {
-    const tryFetch = async (u) => {
-        const res = await fetch(u, { headers: { Accept: "application/json" }, ...options });
-        if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            const err = new Error(`Erro ${res.status}`);
-            err.status = res.status;
-            err.body = text;
-            throw err;
-        }
-        return res.json();
-    };
+const api = (path) => (BASE ? `${BASE}${path}` : path);
 
-    // 1) via rewrite (/api/*)
-    try {
-        return await tryFetch(path);
-    } catch (e) {
-        // 2) fallback direto na BASE pública, se existir
-        if (PUBLIC_BASE && typeof path === "string" && path.startsWith("/")) {
-            return await tryFetch(`${PUBLIC_BASE}${path}`);
-        }
-        throw e;
-    }
-}
-
-const parseList = (data, keys = []) => {
+const asArray = (data, altKeys = []) => {
     if (Array.isArray(data)) return data;
     if (data && typeof data === "object") {
-        for (const k of ["data", "items", ...keys]) {
+        for (const k of ["data", "items", "rows", "result", "results", ...altKeys]) {
             if (Array.isArray(data[k])) return data[k];
         }
     }
@@ -44,72 +30,48 @@ export default function Home() {
     const [marcas, setMarcas] = useState([]);
     const [veiculos, setVeiculos] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const cacheRef = useRef(new Map());
-
-    const cacheGet = (key) => cacheRef.current.get(key);
-    const cacheSet = (key, value) => {
-        const cache = cacheRef.current;
-        if (cache.size >= 10) cache.delete(cache.keys().next().value);
-        cache.set(key, value);
-    };
-
-    const loadData = async () => {
-        setLoading(true);
-        setError(null);
-        const marcasKey = `marcas`;
-        const veiculosKey = `veiculos`;
-        try {
-            let m = cacheGet(marcasKey);
-            if (!m) {
-                const raw = await fetchJsonWithFallback(`/api/marcas`);
-                m = parseList(raw, ["marcas"]);
-                cacheSet(marcasKey, m);
-            }
-            setMarcas(m);
-
-            let v = cacheGet(veiculosKey);
-            if (!v) {
-                const raw = await fetchJsonWithFallback(`/api/veiculos`);
-                v = parseList(raw, ["veiculos"]);
-                cacheSet(veiculosKey, v);
-            }
-            setVeiculos(v);
-        } catch (e) {
-            // Tentar fallback de mocks locais para não quebrar a página durante o dev
-            try {
-                const [mMock, vMock] = await Promise.all([
-                    fetch("/mock/marcas.json").then((r) => r.json()),
-                    fetch("/mock/veiculos.json").then((r) => r.json()),
-                ]);
-                setMarcas(Array.isArray(mMock) ? mMock : []);
-                setVeiculos(Array.isArray(vMock) ? vMock : []);
-                setError("Usando dados de exemplo (API falhou)");
-            } catch (_) {
-                setError((e && (e.message || e.status)) ? `${e.message}${e.body ? ` - ${e.body}` : ""}` : "Falha ao carregar dados");
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
+    const [modal, setModal] = useState({ open: false, item: null });
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(8);
 
     useEffect(() => {
-        loadData();
-
+        const fetchAll = async () => {
+            setLoading(true);
+            try {
+                const [m, v] = await Promise.all([
+                    axios.get(api("/api/marcas"), { timeout: 15000 }),
+                    axios.get(api("/api/veiculos"), { timeout: 15000 }),
+                ]);
+                setMarcas(asArray(m.data, ["marcas"]));
+                setVeiculos(asArray(v.data, ["veiculos"]));
+            } catch (e) {
+                console.error(e);
+                toast.error("Erro ao carregar marcas/veículos");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchAll();
     }, []);
+
+    const pageData = () => {
+        const start = (page - 1) * pageSize;
+        return veiculos.slice(start, start + pageSize);
+    };
 
     return (
         <div className={styles.container}>
-            <h1 className={styles.title}>Loja de Veículos</h1>
-            {error && <p style={{ color: "crimson" }}>Erro: {error}</p>}
+            <h1 className={styles.title}>Marcas e Veículos</h1>
+            <ToastContainer position="top-right" autoClose={4500} />
+
             {loading ? (
-                <p>Carregando...</p>
+                <Skeleton active paragraph={{ rows: 6 }} />
             ) : (
                 <>
-                    <section>
-                        <h2>Marcas</h2>
-                        {Array.isArray(marcas) && marcas.length ? (
-                            <ul>
+                    <section className={styles.section}>
+                        <h2 className={styles.subtitle}>Marcas</h2>
+                        {marcas.length ? (
+                            <ul className={styles.list}>
                                 {marcas.map((m) => (
                                     <li key={m.id || m._id || m.nome}>{m.nome || m.name || "(sem nome)"}</li>
                                 ))}
@@ -119,22 +81,78 @@ export default function Home() {
                         )}
                     </section>
 
-                    <section style={{ marginTop: 16 }}>
-                        <h2>Veículos</h2>
-                        {Array.isArray(veiculos) && veiculos.length ? (
-                            <ul>
-                                {veiculos.map((v) => (
-                                    <li key={v.id || v._id || `${v.marca}-${v.modelo}-${v.placa || v.chassi || Math.random()}` }>
-                                        <strong>{v.modelo || v.nome || "(sem modelo)"}</strong>
-                                        {" "}- {v.marca || v.marcaNome || "(sem marca)"}
-                                        {v.ano ? ` - ${v.ano}` : ""}
-                                    </li>
+                    <section className={styles.section}>
+                        <div className={styles.headerRow}>
+                            <h2 className={styles.subtitle}>Veículos</h2>
+                            <Pagination
+                                current={page}
+                                pageSize={pageSize}
+                                total={veiculos.length}
+                                onChange={(p, s) => {
+                                    setPage(p);
+                                    setPageSize(s);
+                                }}
+                                showSizeChanger
+                                pageSizeOptions={["8", "12", "24"]}
+                            />
+                        </div>
+
+                        {veiculos.length ? (
+                            <div className={styles.cardsContainer}>
+                                {pageData().map((v) => (
+                                    <Card
+                                        key={v.id || v._id || `${v.marca}-${v.modelo}-${v.placa || v.chassi}`}
+                                        className={styles.card}
+                                        hoverable
+                                        onClick={() => setModal({ open: true, item: v })}
+                                        title={`${v.modelo || v.nome || "(sem modelo)"}`}
+                                    >
+                                        <p>
+                                            <strong>Marca:</strong> {v.marca || v.marcaNome || "-"}
+                                        </p>
+                                        {v.ano && (
+                                            <p>
+                                                <strong>Ano:</strong> {v.ano}
+                                            </p>
+                                        )}
+                                    </Card>
                                 ))}
-                            </ul>
+                            </div>
                         ) : (
                             <p>Nenhum veículo encontrado.</p>
                         )}
                     </section>
+
+                    <Modal
+                        title={modal.item ? `${modal.item.marca || "Marca"} • ${modal.item.modelo || "Modelo"}` : "Detalhes"}
+                        open={modal.open}
+                        onCancel={() => setModal({ open: false, item: null })}
+                        onOk={() => setModal({ open: false, item: null })}
+                        width={600}
+                    >
+                        {modal.item ? (
+                            <div>
+                                <p>
+                                    <strong>Marca:</strong> {modal.item.marca || modal.item.marcaNome || "-"}
+                                </p>
+                                <p>
+                                    <strong>Modelo:</strong> {modal.item.modelo || modal.item.nome || "-"}
+                                </p>
+                                {modal.item.ano && (
+                                    <p>
+                                        <strong>Ano:</strong> {modal.item.ano}
+                                    </p>
+                                )}
+                                {modal.item.placa && (
+                                    <p>
+                                        <strong>Placa:</strong> {modal.item.placa}
+                                    </p>
+                                )}
+                            </div>
+                        ) : (
+                            <p>Sem dados.</p>
+                        )}
+                    </Modal>
                 </>
             )}
         </div>

@@ -1,0 +1,10 @@
+.container { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.title { font-size: 32px; font-weight: 800; margin-bottom: 16px; }
+.subtitle { font-size: 22px; margin: 12px 0; }
+.section { margin-bottom: 24px; }
+.list { list-style: disc; padding-left: 20px; }
+.cardsContainer { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.card { border: none; }
+.headerRow { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.modalBody { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+.detailList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
